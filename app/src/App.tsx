@@ -181,9 +181,20 @@ function MainApp() {
 
       const setupRemote = async () => {
         if (serverStore.proxyAutoStart) {
+          // Guard: Don't start proxy with blank or placeholder URL
+          const upstream = serverStore.proxyUpstreamUrl?.trim() || '';
+          if (!upstream || upstream === '' || upstream.includes('REPLACE-ME')) {
+            console.error('Remote mode: Invalid upstream URL:', upstream);
+            if (!cancelled) {
+              setStartupError('Remote proxy upstream URL is not configured. Paste your current Colab trycloudflare URL in Settings.');
+              serverStartingRef.current = false;
+            }
+            return;
+          }
+
           try {
-            console.log('Remote mode: Auto-starting local helper proxy for:', serverStore.proxyUpstreamUrl);
-            await platform.lifecycle.startRemoteProxy(serverStore.proxyUpstreamUrl, 17493);
+            console.log('Remote mode: Auto-starting local helper proxy for:', upstream);
+            await platform.lifecycle.startRemoteProxy(upstream, 17493);
             window.__voiceboxRemoteProxyStartedByApp = true;
 
             // When autostarting, we MUST talk to the local proxy.
