@@ -7,7 +7,7 @@
     "beforeDevCommand": "npm --prefix ../app run dev -- --host 127.0.0.1 --port 5174",
     "beforeBuildCommand": "npm --prefix ../app run build",
     "frontendDist": "../../app/dist",
-    "devUrl": "http://127.0.0.1:5174"
+    "devUrl": "http://127.0.0.1:5175"
   },
   "bundle": {
     "active": true,
