@@ -1570,13 +1570,14 @@ pub fn run() {
                     }
 
                     // Always kill the remote proxy on exit
-                    let proxy_state = app.state::<RemoteProxyState>();
-                    if let Ok(mut guard) = proxy_state.child.lock() {
-                        if let Some(mut child) = guard.take() {
-                            println!("RunEvent::Exit - killing remote proxy");
-                            let _ = child.kill();
+                    {
+                        if let Ok(mut guard) = app.state::<RemoteProxyState>().child.lock() {
+                            if let Some(mut child) = guard.take() {
+                                println!("RunEvent::Exit - killing remote proxy");
+                                let _ = child.kill();
+                            }
                         }
-                    }
+                    };
                 }
                 RunEvent::ExitRequested { api, .. } => {
                     println!("RunEvent::ExitRequested received");
