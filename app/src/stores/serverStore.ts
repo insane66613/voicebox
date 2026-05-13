@@ -70,7 +70,7 @@ export function isLoopbackVoiceboxServerUrl(url: string): boolean {
 export const useServerStore = create<ServerStore>()(
   persist(
     (set, get) => ({
-      serverUrl: getDefaultServerUrl(),
+      serverUrl: 'http://127.0.0.1:17493',
       setServerUrl: (url) => {
         const prev = get().serverUrl;
         set({ serverUrl: url });
@@ -82,7 +82,7 @@ export const useServerStore = create<ServerStore>()(
       isConnected: false,
       setIsConnected: (connected) => set({ isConnected: connected }),
 
-      mode: 'local',
+      mode: 'remote',
       setMode: (mode) => set({ mode }),
 
       keepServerRunningOnClose: false,

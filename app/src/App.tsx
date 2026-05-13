@@ -149,14 +149,16 @@ function MainApp() {
       console.error('Failed to setup window close handler:', error);
     });
 
-    // Only auto-start server in production mode
-    // In dev mode, user runs server separately
+    // Only auto-start LOCAL server in production mode.
+    // Remote proxy can be auto-started in dev for easier testing.
     if (!import.meta.env?.PROD) {
-      console.log('Dev mode: Skipping auto-start of server (run it separately)');
-      setServerReady(true); // Mark as ready so UI doesn't show loading screen
-      // Mark that server was not started by app (so we don't try to stop it on close)
-      window.__voiceboxServerStartedByApp = false;
-      return;
+      const serverStore = useServerStore.getState();
+      if (serverStore.mode === 'local') {
+        console.log('Dev mode: Skipping auto-start of local server (run it separately)');
+        setServerReady(true);
+        window.__voiceboxServerStartedByApp = false;
+        return;
+      }
     }
 
     // Auto-start server in production
