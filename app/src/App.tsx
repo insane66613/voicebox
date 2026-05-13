@@ -169,51 +169,73 @@ function MainApp() {
     const customModelsDir = serverStore.customModelsDir;
 
     if (isRemote) {
-      console.log(
-        'Remote/proxy mode: skipping bundled sidecar; checking configured serverUrl:',
-        serverStore.serverUrl,
-      );
-
       window.__voiceboxServerStartedByApp = false;
+      window.__voiceboxRemoteProxyStartedByApp = false;
       serverStartingRef.current = true;
 
       let cancelled = false;
       const startedAt = Date.now();
       const timeoutMs = 120_000;
 
-      const pollRemoteProxy = async () => {
-        try {
-          const health = await apiClient.getHealth();
+      const setupRemote = async () => {
+        if (serverStore.proxyAutoStart) {
+          try {
+            console.log('Remote mode: Auto-starting local helper proxy for:', serverStore.proxyUpstreamUrl);
+            await platform.lifecycle.startRemoteProxy(serverStore.proxyUpstreamUrl, 17493);
+            window.__voiceboxRemoteProxyStartedByApp = true;
 
-          if (isVoiceboxHealthResponse(health)) {
-            console.log('Remote/proxy Voicebox server detected');
+            // When autostarting, we MUST talk to the local proxy.
+            const localProxyUrl = 'http://127.0.0.1:17493';
+            if (serverStore.serverUrl !== localProxyUrl) {
+              console.log('Remote mode: Pointing serverUrl to local proxy:', localProxyUrl);
+              serverStore.setServerUrl(localProxyUrl);
+            }
+          } catch (error) {
+            console.error('Remote mode: Failed to start helper proxy:', error);
             if (!cancelled) {
-              setStartupError(null);
-              setServerReady(true);
+              setStartupError('Failed to start local helper proxy sidecar.');
               serverStartingRef.current = false;
             }
             return;
           }
-
-          console.log('Remote/proxy /health response was not Voicebox-shaped:', health);
-        } catch (error) {
-          console.log('Remote/proxy health check failed:', error);
         }
 
-        if (cancelled) return;
+        const pollHealth = async () => {
+          try {
+            const health = await apiClient.getHealth();
 
-        if (Date.now() - startedAt >= timeoutMs) {
-          serverStartingRef.current = false;
-          setStartupError(
-            'Could not connect to the configured remote/proxy Voicebox server within 2 minutes.',
-          );
-          return;
-        }
+            if (isVoiceboxHealthResponse(health)) {
+              console.log('Remote/proxy Voicebox server detected');
+              if (!cancelled) {
+                setStartupError(null);
+                setServerReady(true);
+                serverStartingRef.current = false;
+              }
+              return;
+            }
 
-        setTimeout(pollRemoteProxy, 2000);
+            console.log('Remote/proxy /health response was not Voicebox-shaped:', health);
+          } catch (error) {
+            console.log('Remote/proxy health check failed:', error);
+          }
+
+          if (cancelled) return;
+
+          if (Date.now() - startedAt >= timeoutMs) {
+            serverStartingRef.current = false;
+            setStartupError(
+              'Could not connect to the configured remote/proxy Voicebox server within 2 minutes.',
+            );
+            return;
+          }
+
+          setTimeout(pollHealth, 2000);
+        };
+
+        void pollHealth();
       };
 
-      void pollRemoteProxy();
+      void setupRemote();
 
       return () => {
         cancelled = true;

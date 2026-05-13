@@ -17,6 +17,12 @@ interface ServerStore {
 
   customModelsDir: string | null;
   setCustomModelsDir: (dir: string | null) => void;
+
+  proxyAutoStart: boolean;
+  setProxyAutoStart: (enabled: boolean) => void;
+
+  proxyUpstreamUrl: string;
+  setProxyUpstreamUrl: (url: string) => void;
 }
 
 /**
@@ -84,6 +90,12 @@ export const useServerStore = create<ServerStore>()(
 
       customModelsDir: null,
       setCustomModelsDir: (dir) => set({ customModelsDir: dir }),
+
+      proxyAutoStart: true,
+      setProxyAutoStart: (enabled) => set({ proxyAutoStart: enabled }),
+
+      proxyUpstreamUrl: '',
+      setProxyUpstreamUrl: (url) => set({ proxyUpstreamUrl: url }),
     }),
     {
       name: 'voicebox-server',

@@ -60,6 +60,8 @@ export interface PlatformLifecycle {
   stopServer(): Promise<void>;
   restartServer(modelsDir?: string | null): Promise<string>;
   setKeepServerRunning(keep: boolean): Promise<void>;
+  startRemoteProxy(upstreamUrl: string, port: number): Promise<void>;
+  stopRemoteProxy(): Promise<void>;
   setupWindowCloseHandler(): Promise<void>;
   subscribeToServerLogs(callback: (entry: ServerLogEntry) => void): () => void;
   onServerReady?: () => void;

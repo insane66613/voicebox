@@ -18,6 +18,7 @@ mod synthetic_keys;
 use std::sync::Mutex;
 use tauri::{command, State, Manager, WindowEvent, Emitter, Listener, RunEvent, WebviewUrl, WebviewWindowBuilder, PhysicalPosition};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::CommandChild;
 use tokio::sync::mpsc;
 
 pub const DICTATE_WINDOW_LABEL: &str = "dictate";
@@ -200,6 +201,81 @@ struct ServerState {
     server_pid: Mutex<Option<u32>>,
     keep_running_on_close: Mutex<bool>,
     models_dir: Mutex<Option<String>>,
+}
+
+struct RemoteProxyState {
+    child: Mutex<Option<CommandChild>>,
+}
+
+#[command]
+async fn start_remote_proxy(
+    app: tauri::AppHandle,
+    state: State<'_, RemoteProxyState>,
+    upstream_url: String,
+    port: u16,
+) -> Result<(), String> {
+    let mut guard = state.child.lock().map_err(|e| e.to_string())?;
+
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    println!("Starting remote proxy sidecar: upstream={}", upstream_url);
+
+    let sidecar = app
+        .shell()
+        .sidecar("voicebox-remote-proxy")
+        .map_err(|e| format!("Failed to find sidecar: {e}"))?
+        .args([
+            "--upstream-url",
+            &upstream_url,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ]);
+
+    let (mut rx, child) = sidecar.spawn().map_err(|e| format!("Failed to spawn sidecar: {e}"))?;
+
+    // Log sidecar output for debugging
+    let app_handle = app.clone();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                tauri_plugin_shell::process::CommandEvent::Stdout(line) => {
+                    let line_str = String::from_utf8_lossy(&line);
+                    let _ = app_handle.emit("proxy-log", serde_json::json!({
+                        "stream": "stdout",
+                        "line": line_str.trim_end(),
+                    }));
+                }
+                tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
+                    let line_str = String::from_utf8_lossy(&line);
+                    let _ = app_handle.emit("proxy-log", serde_json::json!({
+                        "stream": "stderr",
+                        "line": line_str.trim_end(),
+                    }));
+                }
+                _ => {}
+            }
+        }
+    });
+
+    *guard = Some(child);
+
+    Ok(())
+}
+
+#[command]
+async fn stop_remote_proxy(state: State<'_, RemoteProxyState>) -> Result<(), String> {
+    let mut guard = state.child.lock().map_err(|e| e.to_string())?;
+
+    if let Some(mut child) = guard.take() {
+        println!("Stopping remote proxy sidecar...");
+        child.kill().map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[command]
@@ -1240,6 +1316,9 @@ pub fn run() {
             keep_running_on_close: Mutex::new(false),
             models_dir: Mutex::new(None),
         })
+        .manage(RemoteProxyState {
+            child: Mutex::new(None),
+        })
         .manage(audio_capture::AudioCaptureState::new())
         .manage(audio_output::AudioOutputState::new())
         .setup(|app| {
@@ -1374,7 +1453,9 @@ pub fn run() {
             paste_final_text,
             enable_hotkey,
             disable_hotkey,
-            update_chord_bindings
+            update_chord_bindings,
+            start_remote_proxy,
+            stop_remote_proxy
         ])
         .on_window_event({
             let closing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1485,6 +1566,15 @@ pub fn run() {
                                     .args(["-9", &pid.to_string()])
                                     .output();
                             }
+                        }
+                    }
+
+                    // Always kill the remote proxy on exit
+                    let proxy_state = app.state::<RemoteProxyState>();
+                    if let Ok(mut guard) = proxy_state.child.lock() {
+                        if let Some(mut child) = guard.take() {
+                            println!("RunEvent::Exit - killing remote proxy");
+                            let _ = child.kill();
                         }
                     }
                 }

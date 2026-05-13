@@ -258,21 +258,37 @@ async def proxy_all(path: str, request: Request) -> Response:
     )
 
 
+import argparse
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Voicebox local remote proxy")
+    parser.add_argument("--upstream-url", default=None)
+    parser.add_argument("--host", default=LOCAL_HOST)
+    parser.add_argument("--port", type=int, default=LOCAL_PORT)
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     ensure_config()
+
+    if args.upstream_url:
+        cfg = load_config()
+        cfg["upstream_url"] = args.upstream_url.rstrip("/")
+        save_config(cfg)
 
     print("=" * 72)
     print("Voicebox local remote proxy")
-    print(f"Listening:    http://{LOCAL_HOST}:{LOCAL_PORT}")
+    print(f"Listening:    http://{args.host}:{args.port}")
     print(f"Config file:  {CONFIG_PATH}")
     print(f"Upstream:     {load_config().get('upstream_url')}")
-    print("Health shim:  http://127.0.0.1:17493/health")
+    print(f"Health shim:  http://{args.host}:{args.port}/health")
     print("=" * 72)
 
     uvicorn.run(
         app,
-        host=LOCAL_HOST,
-        port=LOCAL_PORT,
+        host=args.host,
+        port=args.port,
         log_level="info",
         access_log=True,
     )

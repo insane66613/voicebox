@@ -35,6 +35,10 @@ export function GeneralPage() {
   const setKeepServerRunningOnClose = useServerStore((state) => state.setKeepServerRunningOnClose);
   const mode = useServerStore((state) => state.mode);
   const setMode = useServerStore((state) => state.setMode);
+  const proxyAutoStart = useServerStore((state) => state.proxyAutoStart);
+  const setProxyAutoStart = useServerStore((state) => state.setProxyAutoStart);
+  const proxyUpstreamUrl = useServerStore((state) => state.proxyUpstreamUrl);
+  const setProxyUpstreamUrl = useServerStore((state) => state.setProxyUpstreamUrl);
   const { toast } = useToast();
   const { data: health, isLoading, error: healthError } = useServerHealth();
 
@@ -125,9 +129,21 @@ export function GeneralPage() {
                 render={({ field }) => (
                   <FormItem className="flex-1">
                     <FormControl>
-                      <Input placeholder="http://127.0.0.1:17493" {...field} />
+                      <Input
+                        placeholder="http://127.0.0.1:17493"
+                        {...field}
+                        readOnly={proxyAutoStart && mode === 'remote'}
+                        className={cn(
+                          proxyAutoStart && mode === 'remote' && 'bg-muted/50 cursor-not-allowed',
+                        )}
+                      />
                     </FormControl>
                     <FormMessage />
+                    {proxyAutoStart && mode === 'remote' && (
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Managed by local helper proxy
+                      </p>
+                    )}
                   </FormItem>
                 )}
               />
@@ -197,6 +213,53 @@ export function GeneralPage() {
           />
         )}
 
+        {platform.metadata.isTauri && mode === 'remote' && (
+          <>
+            <SettingRow
+              title="Local helper proxy"
+              description="Automatically launch a local sidecar to manage the connection to your remote server. Recommended for Cloudflare/Colab users to prevent rate-limit issues."
+              htmlFor="proxyAutoStart"
+              action={
+                <Toggle
+                  id="proxyAutoStart"
+                  checked={proxyAutoStart}
+                  onCheckedChange={setProxyAutoStart}
+                />
+              }
+            />
+
+            {proxyAutoStart && (
+              <SettingRow
+                title="Proxy upstream URL"
+                description="The Cloudflare or Colab tunnel URL that the helper proxy should forward traffic to."
+                htmlFor="proxyUpstreamUrl"
+              >
+                <div className="flex gap-2">
+                  <Input
+                    id="proxyUpstreamUrl"
+                    placeholder="https://whatever.trycloudflare.com"
+                    value={proxyUpstreamUrl}
+                    onChange={(e) => setProxyUpstreamUrl(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      toast({
+                        title: 'Upstream updated',
+                        description: 'The helper proxy will use the new upstream URL. Restart the app if connectivity is lost.',
+                      });
+                    }}
+                  >
+                    {t('common.save')}
+                  </Button>
+                </div>
+              </SettingRow>
+            )}
+          </>
+        )}
+
         <SettingRow
           title={t('settings.language.label')}
           description={t('settings.language.description')}
@@ -258,6 +321,11 @@ function ConnectionStatus({
         <span className="text-xs text-muted-foreground">
           {t('settings.general.connection.online')}
         </span>
+        {health.status === 'healthy' && (
+          <span className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded ml-1 font-medium">
+            HEALTH LOCAL
+          </span>
+        )}
       </div>
     );
   }
