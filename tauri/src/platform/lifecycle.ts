@@ -52,6 +52,26 @@ class TauriLifecycle implements PlatformLifecycle {
     }
   }
 
+  async startRemoteProxy(upstreamUrl: string, port = 17493): Promise<void> {
+    try {
+      await invoke('start_remote_proxy', { upstreamUrl, port });
+      console.log('Remote proxy started for:', upstreamUrl);
+    } catch (error) {
+      console.error('Failed to start remote proxy:', error);
+      throw error;
+    }
+  }
+
+  async stopRemoteProxy(): Promise<void> {
+    try {
+      await invoke('stop_remote_proxy');
+      console.log('Remote proxy stopped');
+    } catch (error) {
+      console.error('Failed to stop remote proxy:', error);
+      throw error;
+    }
+  }
+
   async setupWindowCloseHandler(): Promise<void> {
     try {
       // Listen for window close request from Rust
@@ -60,8 +80,7 @@ class TauriLifecycle implements PlatformLifecycle {
         const { useServerStore } = await import('@/stores/serverStore');
         const keepRunning = useServerStore.getState().keepServerRunningOnClose;
 
-        // Check if server was started by this app instance
-        // @ts-expect-error - accessing module-level variable from another module
+        // Check if server was started by this app instance.
         const serverStartedByApp = window.__voiceboxServerStartedByApp ?? false;
 
         console.log(

@@ -14,6 +14,7 @@ import { useAutoUpdater } from '@/hooks/useAutoUpdater';
 import { useServerHealth } from '@/lib/hooks/useServer';
 import { usePlatform } from '@/platform/PlatformContext';
 import { useServerStore } from '@/stores/serverStore';
+import { cn } from '@/lib/utils/cn';
 import { LanguageSelect } from './LanguageSelect';
 import { SettingRow, SettingSection } from './SettingRow';
 import { ThemeSelect } from './ThemeSelect';
@@ -35,6 +36,10 @@ export function GeneralPage() {
   const setKeepServerRunningOnClose = useServerStore((state) => state.setKeepServerRunningOnClose);
   const mode = useServerStore((state) => state.mode);
   const setMode = useServerStore((state) => state.setMode);
+  const proxyAutoStart = useServerStore((state) => state.proxyAutoStart);
+  const setProxyAutoStart = useServerStore((state) => state.setProxyAutoStart);
+  const proxyUpstreamUrl = useServerStore((state) => state.proxyUpstreamUrl);
+  const setProxyUpstreamUrl = useServerStore((state) => state.setProxyUpstreamUrl);
   const { toast } = useToast();
   const { data: health, isLoading, error: healthError } = useServerHealth();
 
@@ -114,7 +119,12 @@ export function GeneralPage() {
           title={t('settings.general.serverUrl.title')}
           description={t('settings.general.serverUrl.description')}
           action={
-            <ConnectionStatus health={health} isLoading={isLoading} healthError={healthError} />
+            <ConnectionStatus
+              health={health}
+              isLoading={isLoading}
+              healthError={healthError}
+              remoteViaProxy={platform.metadata.isTauri && mode === 'remote' && proxyAutoStart}
+            />
           }
         >
           <Form {...form}>
@@ -125,9 +135,21 @@ export function GeneralPage() {
                 render={({ field }) => (
                   <FormItem className="flex-1">
                     <FormControl>
-                      <Input placeholder="http://127.0.0.1:17493" {...field} />
+                      <Input
+                        placeholder="http://127.0.0.1:17493"
+                        {...field}
+                        readOnly={proxyAutoStart && mode === 'remote'}
+                        className={cn(
+                          proxyAutoStart && mode === 'remote' && 'bg-muted/50 cursor-not-allowed',
+                        )}
+                      />
                     </FormControl>
                     <FormMessage />
+                    {proxyAutoStart && mode === 'remote' && (
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Managed by local helper proxy
+                      </p>
+                    )}
                   </FormItem>
                 )}
               />
@@ -173,25 +195,75 @@ export function GeneralPage() {
 
         {platform.metadata.isTauri && (
           <SettingRow
-            title={t('settings.general.networkAccess.title')}
-            description={t('settings.general.networkAccess.description')}
-            htmlFor="allowNetworkAccess"
+            title="Server mode"
+            description="In remote mode, Voicebox will connect to the Server URL and will not start the bundled sidecar. Restart the app after changing this setting."
+            htmlFor="serverMode"
             action={
-              <Toggle
-                id="allowNetworkAccess"
-                checked={mode === 'remote'}
-                onCheckedChange={(checked: boolean) => {
-                  setMode(checked ? 'remote' : 'local');
+              <select
+                id="serverMode"
+                value={mode}
+                onChange={(event) => {
+                  const newMode = event.target.value as 'local' | 'remote';
+                  setMode(newMode);
                   toast({
-                    title: t('settings.general.networkAccess.updatedTitle'),
-                    description: checked
-                      ? t('settings.general.networkAccess.enabled')
-                      : t('settings.general.networkAccess.disabled'),
+                    title: 'Server mode updated',
+                    description: `Server mode changed to ${newMode}. Restart the app to apply.`,
                   });
                 }}
-              />
+                className="flex h-9 w-[200px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="local">Local bundled server</option>
+                <option value="remote">Remote / proxy server</option>
+              </select>
             }
           />
+        )}
+
+        {platform.metadata.isTauri && mode === 'remote' && (
+          <>
+            <SettingRow
+              title="Local helper proxy"
+              description="Automatically launch a local sidecar to manage the connection to your remote server. Recommended for Cloudflare/Colab users to prevent rate-limit issues."
+              htmlFor="proxyAutoStart"
+              action={
+                <Toggle
+                  id="proxyAutoStart"
+                  checked={proxyAutoStart}
+                  onCheckedChange={setProxyAutoStart}
+                />
+              }
+            />
+
+            {proxyAutoStart && (
+              <SettingRow
+                title="Proxy upstream URL"
+                description="The Cloudflare or Colab tunnel URL that the helper proxy should forward traffic to."
+                htmlFor="proxyUpstreamUrl"
+              >
+                <div className="flex gap-2">
+                  <Input
+                    id="proxyUpstreamUrl"
+                    placeholder="Current Colab tunnel is supplied by the launcher"
+                    value={proxyUpstreamUrl}
+                    onChange={(e) => setProxyUpstreamUrl(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      toast({
+                        title: 'Upstream updated',
+                        description: 'The helper proxy will use the new upstream URL. Restart the app if connectivity is lost.',
+                      });
+                    }}
+                  >
+                    {t('common.save')}
+                  </Button>
+                </div>
+              </SettingRow>
+            )}
+          </>
         )}
 
         <SettingRow
@@ -218,10 +290,12 @@ function ConnectionStatus({
   health,
   isLoading,
   healthError,
+  remoteViaProxy,
 }: {
   health: ReturnType<typeof useServerHealth>['data'];
   isLoading: boolean;
   healthError: ReturnType<typeof useServerHealth>['error'];
+  remoteViaProxy: boolean;
 }) {
   const { t } = useTranslation();
   if (isLoading) {
@@ -255,6 +329,11 @@ function ConnectionStatus({
         <span className="text-xs text-muted-foreground">
           {t('settings.general.connection.online')}
         </span>
+        {health.status === 'healthy' && (
+          <span className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded ml-1 font-medium">
+            {remoteViaProxy ? 'REMOTE VIA PROXY' : 'HEALTH LOCAL'}
+          </span>
+        )}
       </div>
     );
   }

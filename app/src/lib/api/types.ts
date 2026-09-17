@@ -272,6 +272,18 @@ export interface HealthResponse {
   backend_variant?: string; // "cpu" or "cuda"
 }
 
+export interface RuntimeLogEntry {
+  cursor: number;
+  timestamp: number;
+  stream: 'stdout' | 'stderr';
+  line: string;
+}
+
+export interface RuntimeLogResponse {
+  cursor: number;
+  entries: RuntimeLogEntry[];
+}
+
 export interface CudaDownloadProgress {
   model_name: string;
   current: number;

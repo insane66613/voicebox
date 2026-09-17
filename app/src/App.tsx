@@ -149,14 +149,16 @@ function MainApp() {
       console.error('Failed to setup window close handler:', error);
     });
 
-    // Only auto-start server in production mode
-    // In dev mode, user runs server separately
+    // Only auto-start LOCAL server in production mode.
+    // Remote proxy can be auto-started in dev for easier testing.
     if (!import.meta.env?.PROD) {
-      console.log('Dev mode: Skipping auto-start of server (run it separately)');
-      setServerReady(true); // Mark as ready so UI doesn't show loading screen
-      // Mark that server was not started by app (so we don't try to stop it on close)
-      window.__voiceboxServerStartedByApp = false;
-      return;
+      const serverStore = useServerStore.getState();
+      if (serverStore.mode === 'local') {
+        console.log('Dev mode: Skipping auto-start of local server (run it separately)');
+        setServerReady(true);
+        window.__voiceboxServerStartedByApp = false;
+        return;
+      }
     }
 
     // Auto-start server in production
@@ -164,13 +166,109 @@ function MainApp() {
       return;
     }
 
+    const serverStore = useServerStore.getState();
+    const isRemote = serverStore.mode === 'remote';
+    const customModelsDir = serverStore.customModelsDir;
+
+    if (isRemote) {
+      window.__voiceboxServerStartedByApp = false;
+      window.__voiceboxRemoteProxyStartedByApp = false;
+      serverStartingRef.current = true;
+
+      let cancelled = false;
+      const startedAt = Date.now();
+      const timeoutMs = 120_000;
+
+      const setupRemote = async () => {
+        if (serverStore.proxyAutoStart) {
+          // Guard: Don't start proxy with blank or placeholder URL
+          // The launcher injects the current ephemeral Colab tunnel. It must win over
+          // a persisted URL from an older Colab VM, otherwise restart can revive a
+          // dead trycloudflare endpoint. Mirror the resolved value into the store so
+          // Settings displays the actual upstream rather than a placeholder.
+          const launcherUpstream = import.meta.env.VITE_VOICEBOX_REMOTE_UPSTREAM_URL?.trim() || '';
+          const upstream = launcherUpstream || serverStore.proxyUpstreamUrl?.trim() || '';
+          if (launcherUpstream && serverStore.proxyUpstreamUrl !== launcherUpstream) {
+            serverStore.setProxyUpstreamUrl(upstream);
+          }
+          if (!upstream || upstream.includes('REPLACE-ME')) {
+            console.error('Remote mode: Invalid upstream URL:', upstream);
+            // By-pass the blocking error screen so user can access Settings to fix the URL!
+            if (!cancelled) {
+              setServerReady(true);
+            }
+            return;
+          }
+
+          try {
+            console.log('Remote mode: Auto-starting local helper proxy for:', upstream);
+            await platform.lifecycle.startRemoteProxy(upstream, 17493);
+            window.__voiceboxRemoteProxyStartedByApp = true;
+
+            // When autostarting, we MUST talk to the local proxy.
+            const localProxyUrl = 'http://127.0.0.1:17493';
+            if (serverStore.serverUrl !== localProxyUrl) {
+              console.log('Remote mode: Pointing serverUrl to local proxy:', localProxyUrl);
+              serverStore.setServerUrl(localProxyUrl);
+            }
+          } catch (error) {
+            console.error('Remote mode: Failed to start helper proxy:', error);
+            if (!cancelled) {
+              setStartupError('Failed to start local helper proxy sidecar.');
+              serverStartingRef.current = false;
+            }
+            return;
+          }
+        }
+
+        const pollHealth = async () => {
+          try {
+            const health = await apiClient.getHealth();
+
+            if (isVoiceboxHealthResponse(health)) {
+              console.log('Remote/proxy Voicebox server detected');
+              if (!cancelled) {
+                setStartupError(null);
+                setServerReady(true);
+                serverStartingRef.current = false;
+              }
+              return;
+            }
+
+            console.log('Remote/proxy /health response was not Voicebox-shaped:', health);
+          } catch (error) {
+            console.log('Remote/proxy health check failed:', error);
+          }
+
+          if (cancelled) return;
+
+          if (Date.now() - startedAt >= timeoutMs) {
+            serverStartingRef.current = false;
+            setStartupError(
+              'Could not connect to the configured remote/proxy Voicebox server within 2 minutes.',
+            );
+            return;
+          }
+
+          setTimeout(pollHealth, 2000);
+        };
+
+        void pollHealth();
+      };
+
+      void setupRemote();
+
+      return () => {
+        cancelled = true;
+        serverStartingRef.current = false;
+      };
+    }
+
     serverStartingRef.current = true;
-    const isRemote = useServerStore.getState().mode === 'remote';
-    const customModelsDir = useServerStore.getState().customModelsDir;
-    console.log(`Production mode: Starting bundled server... (remote: ${isRemote})`);
+    console.log('Production mode: Starting bundled local server...');
 
     platform.lifecycle
-      .startServer(isRemote, customModelsDir)
+      .startServer(false, customModelsDir)
       .then((serverUrl) => {
         console.log('Server is ready at:', serverUrl);
         // Update the server URL in the store with the dynamically assigned port

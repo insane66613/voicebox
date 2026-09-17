@@ -40,8 +40,12 @@ export function FloatingGenerateBox({
   const selectedProfileId = useUIStore((state) => state.selectedProfileId);
   const setSelectedProfileId = useUIStore((state) => state.setSelectedProfileId);
   const setSelectedEngine = useUIStore((state) => state.setSelectedEngine);
-  const { data: selectedProfile } = useProfile(selectedProfileId || '');
   const { data: profiles } = useProfiles();
+  const validSelectedProfileId =
+    selectedProfileId && profiles?.some((profile) => profile.id === selectedProfileId)
+      ? selectedProfileId
+      : '';
+  const { data: selectedProfile } = useProfile(validSelectedProfileId);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isInstructExpanded, setIsInstructExpanded] = useState(false);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
@@ -128,9 +132,12 @@ export function FloatingGenerateBox({
     };
   }, [isExpanded]);
 
-  // Set first voice as default if none selected
+  // Keep the persisted selection valid for the currently connected backend.
+  // A remote/runtime replacement can restore a different profile set, so a
+  // previously selected ID must not be queried forever after it disappears.
   useEffect(() => {
-    if (!selectedProfileId && profiles && profiles.length > 0) {
+    if (!profiles || profiles.length === 0) return;
+    if (!selectedProfileId || !profiles.some((profile) => profile.id === selectedProfileId)) {
       setSelectedProfileId(profiles[0].id);
     }
   }, [selectedProfileId, profiles, setSelectedProfileId]);

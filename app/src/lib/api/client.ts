@@ -12,6 +12,7 @@ import type {
   GenerationResponse,
   GenerationVersionResponse,
   HealthResponse,
+  RuntimeLogResponse,
   HistoryListResponse,
   HistoryQuery,
   HistoryResponse,
@@ -96,6 +97,12 @@ class ApiClient {
   // Health
   async getHealth(): Promise<HealthResponse> {
     return this.request<HealthResponse>('/health');
+  }
+
+  async getRuntimeLogs(after?: number, limit = 200): Promise<RuntimeLogResponse> {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (after !== undefined) params.set('after', after.toString());
+    return this.request<RuntimeLogResponse>(`/logs/runtime?${params.toString()}`);
   }
 
   // Profiles

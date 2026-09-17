@@ -119,6 +119,8 @@ def _configure_cors(application: FastAPI) -> None:
     default_origins = [
         "http://localhost:5173",  # Vite dev server
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://localhost:17493",
         "http://127.0.0.1:17493",
         "tauri://localhost",  # Tauri webview (macOS)
@@ -213,6 +215,11 @@ def _get_gpu_status() -> str:
 
 async def _run_startup(application: FastAPI) -> None:
     """Database init, warnings, model-cache prep. Runs on lifespan entry."""
+    # Uvicorn configures its loggers after module import, so attach the
+    # diagnostics handler again here to keep capturing post-startup activity.
+    from .utils.runtime_logs import install_runtime_log_handler
+    install_runtime_log_handler()
+
     import platform
     import sys
 

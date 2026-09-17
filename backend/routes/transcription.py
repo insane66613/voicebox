@@ -1,6 +1,7 @@
 """Transcription endpoints."""
 
 import asyncio
+import logging
 import tempfile
 from pathlib import Path
 
@@ -12,8 +13,13 @@ from ..services.task_queue import create_background_task
 from ..utils.tasks import get_task_manager
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB
+
+# Keep the real container extension long enough for load_audio to choose the
+# correct decoder; unknown/missing extensions retain the historical WAV fallback.
+ALLOWED_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".webm", ".opus"}
 
 
 @router.post("/transcribe", response_model=models.TranscriptionResponse)
@@ -23,17 +29,27 @@ async def transcribe_audio(
     model: str | None = Form(None),
 ):
     """Transcribe audio file to text."""
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+    uploaded_ext = Path(file.filename or "").suffix.lower()
+    file_suffix = uploaded_ext if uploaded_ext in ALLOWED_AUDIO_EXTS else ".wav"
+
+    with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=False) as tmp:
         while chunk := await file.read(UPLOAD_CHUNK_SIZE):
             tmp.write(chunk)
         tmp_path = tmp.name
 
+    stt_path = tmp_path
     try:
-        from ..utils.audio import load_audio
+        from ..utils.audio import load_audio, save_audio
         from ..backends import WHISPER_HF_REPOS
 
         audio, sr = await asyncio.to_thread(load_audio, tmp_path)
         duration = len(audio) / sr
+
+        # Decode using the real upload container, then normalize non-WAV input
+        # for STT backends that cannot consume WebM/Opus/MP4-family containers.
+        if file_suffix != ".wav":
+            stt_path = f"{tmp_path}.stt.wav"
+            await asyncio.to_thread(save_audio, audio, stt_path, sr)
 
         whisper_model = transcribe.get_whisper_model()
         model_size = model if model else whisper_model.model_size
@@ -57,8 +73,9 @@ async def transcribe_audio(
                 except Exception as e:
                     task_manager.error_download(progress_model_name, str(e))
 
-            task_manager.start_download(progress_model_name)
-            create_background_task(download_whisper_background())
+            if not task_manager.is_download_active(progress_model_name):
+                task_manager.start_download(progress_model_name)
+                create_background_task(download_whisper_background())
 
             raise HTTPException(
                 status_code=202,
@@ -69,7 +86,7 @@ async def transcribe_audio(
                 },
             )
 
-        text = await whisper_model.transcribe(tmp_path, language, model_size)
+        text = await whisper_model.transcribe(stt_path, language, model_size)
 
         return models.TranscriptionResponse(
             text=text,
@@ -79,6 +96,9 @@ async def transcribe_audio(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=500, detail="Transcription failed") from e
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+        if stt_path != tmp_path:
+            Path(stt_path).unlink(missing_ok=True)
