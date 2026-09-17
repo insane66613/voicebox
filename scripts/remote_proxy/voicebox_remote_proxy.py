@@ -24,7 +24,7 @@ CONFIG_PATH = Path(
 )
 
 DEFAULT_CONFIG = {
-    "upstream_url": "https://REPLACE-ME.trycloudflare.com",
+    "upstream_url": "https://voicebox.ptelectronics.net",
     "health": {
         "status": "healthy",
         "model_loaded": False,
@@ -107,12 +107,33 @@ def get_upstream_url() -> str:
     return upstream.rstrip("/")
 
 
+async def fetch_speak_poll(
+    client: httpx.AsyncClient,
+    upstream: str,
+    cursor: int | None,
+) -> dict[str, Any]:
+    params: dict[str, str] = {"timeout": "10"}
+    if cursor is not None:
+        params["after"] = str(cursor)
+    response = await client.get(f"{upstream}/events/speak/poll", params=params)
+    response.raise_for_status()
+    return response.json()
+
+
 def filtered_request_headers(request: Request) -> dict[str, str]:
     headers: dict[str, str] = {}
 
     for key, value in request.headers.items():
         if key.lower() not in HOP_BY_HOP_HEADERS:
             headers[key] = value
+
+    # Inject Cloudflare Access headers if present in environment
+    cf_id = os.getenv("CF_ACCESS_CLIENT_ID")
+    cf_secret = os.getenv("CF_ACCESS_CLIENT_SECRET")
+    if cf_id:
+        headers["CF-Access-Client-Id"] = cf_id
+    if cf_secret:
+        headers["CF-Access-Client-Secret"] = cf_secret
 
     return headers
 
@@ -195,6 +216,43 @@ async def update_upstream(request: Request) -> JSONResponse:
     )
 
 
+@app.get("/events/speak")
+async def speak_events_bridge(request: Request) -> StreamingResponse:
+    """Expose local SSE while polling the remote backend over ordinary HTTP."""
+    upstream = get_upstream_url()
+
+    async def event_stream():
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            baseline = await fetch_speak_poll(client, upstream, None)
+            cursor = int(baseline.get("cursor", 0))
+            yield b"event: ready\ndata: {}\n\n"
+
+            while not await request.is_disconnected():
+                try:
+                    payload = await fetch_speak_poll(client, upstream, cursor)
+                    cursor = int(payload.get("cursor", cursor))
+                    remote_events = payload.get("events", [])
+                    if not remote_events:
+                        yield b"event: ping\ndata: {}\n\n"
+                        continue
+                    for event in remote_events:
+                        kind = str(event.get("kind", "message"))
+                        data = {k: v for k, v in event.items() if k not in {"kind", "sequence"}}
+                        yield f"event: {kind}\ndata: {json.dumps(data)}\n\n".encode()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    print("Speak event poll failed:", repr(exc))
+                    yield b"event: ping\ndata: {}\n\n"
+                    await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.api_route(
     "/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
@@ -209,6 +267,16 @@ async def proxy_all(path: str, request: Request) -> Response:
 
     body = await request.body()
     headers = filtered_request_headers(request)
+
+    print("Proxy request to:", target_url)
+    print("Proxy request headers keys:", list(headers.keys()))
+    print("CF-Access-Client-Id present:", "CF-Access-Client-Id" in headers)
+    print("CF-Access-Client-Secret present:", "CF-Access-Client-Secret" in headers)
+    if "CF-Access-Client-Id" in headers:
+        print("CF-Access-Client-Id length:", len(headers["CF-Access-Client-Id"]))
+    if "CF-Access-Client-Secret" in headers:
+        print("CF-Access-Client-Secret length:", len(headers["CF-Access-Client-Secret"]))
+
 
     client = httpx.AsyncClient(
         timeout=None,

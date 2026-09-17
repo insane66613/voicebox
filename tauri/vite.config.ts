@@ -23,7 +23,7 @@ export default defineConfig({
   root: path.resolve(__dirname),
   clearScreen: false,
   server: {
-    host: '127.0.0.1',
+    host: 'localhost',
     port: 5174,
     strictPort: true,
     // Watch files in the app directory for changes

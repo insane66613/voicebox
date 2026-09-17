@@ -253,6 +253,11 @@ class PyTorchSTTBackend:
         self.processor = None
         self.model_size = model_size
         self.device = self._get_device()
+        # Loading mutates the shared processor/model pair. Keep it single-flight
+        # so concurrent HTTP retries cannot initialize Whisper multiple times.
+        self._load_lock = asyncio.Lock()
+        # Transformers model.generate is not treated as re-entrant on one GPU.
+        self._transcribe_lock = asyncio.Lock()
 
     def _get_device(self) -> str:
         """Get the best available device."""
@@ -279,7 +284,11 @@ class PyTorchSTTBackend:
         if self.model is not None and self.model_size == model_size:
             return
 
-        await asyncio.to_thread(self._load_model_sync, model_size)
+        async with self._load_lock:
+            # Another request may have completed the load while we waited.
+            if self.model is not None and self.model_size == model_size:
+                return
+            await asyncio.to_thread(self._load_model_sync, model_size)
 
     # Alias for compatibility
     load_model = load_model_async
@@ -374,5 +383,7 @@ class PyTorchSTTBackend:
 
             return transcription.strip()
 
-        # Run blocking transcription in thread pool
-        return await asyncio.to_thread(_transcribe_sync)
+        # Keep inference single-file on the shared model/processor pair. This
+        # prevents simultaneous generate() calls from racing for the same GPU.
+        async with self._transcribe_lock:
+            return await asyncio.to_thread(_transcribe_sync)

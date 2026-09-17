@@ -20,6 +20,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/events/speak/poll")
+async def poll_speak_events(after: int | None = None, timeout: float = 10.0):
+    """Bounded long-poll fallback for transports that buffer SSE."""
+    timeout = max(0.0, min(timeout, 12.0))
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+
+    while True:
+        snapshot = mcp_events.poll_snapshot(after)
+        if after is None or snapshot["events"] or loop.time() >= deadline:
+            return snapshot
+        await asyncio.sleep(0.2)
+
+
 @router.get("/events/speak")
 async def speak_events(request: Request):
     """SSE stream of speak-start / speak-end events."""

@@ -37,15 +37,30 @@ def _path_relative_to_any_data_dir(path: Path) -> Path | None:
     return None
 
 
-def set_data_dir(path: str | Path):
-    """
-    Set the data directory path.
+def validate_persistent_storage(data_dir: str | Path) -> None:
+    """Fail closed when a runtime declares that durable storage is required."""
+    root_raw = os.environ.get("VOICEBOX_REQUIRE_PERSISTENT_ROOT")
+    if not root_raw:
+        return
 
-    Args:
-        path: Path to the data directory
-    """
+    root = Path(root_raw).resolve()
+    mount = Path(os.environ.get("VOICEBOX_REQUIRE_MOUNTPOINT", root_raw)).resolve()
+    data = Path(data_dir).resolve()
+    models_raw = os.environ.get("VOICEBOX_MODELS_DIR")
+    if not mount.is_mount():
+        raise RuntimeError(f"Required persistent storage is not mounted: {mount}")
+    if not data.is_relative_to(root):
+        raise RuntimeError(f"Data directory is outside required persistent root: {data}")
+    if not models_raw or not Path(models_raw).resolve().is_relative_to(root):
+        raise RuntimeError("Model cache is outside required persistent root")
+
+
+def set_data_dir(path: str | Path):
+    """Set the data directory path."""
     global _data_dir
-    _data_dir = Path(path).resolve()
+    resolved = Path(path).resolve()
+    validate_persistent_storage(resolved)
+    _data_dir = resolved
     _data_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Data directory set to: %s", _data_dir)
 
@@ -80,6 +95,11 @@ def resolve_storage_path(path: str | Path | None) -> Path | None:
         return None
 
     stored_path = Path(path)
+    # Empty paths (e.g. failed generations) must not resolve to the data
+    # dir itself, which exists and would defeat the callers' 404 guards.
+    # Path("") is truthy, so check parts rather than the raw value.
+    if not stored_path.parts:
+        return None
     if stored_path.is_absolute():
         rebased_path = _path_relative_to_any_data_dir(stored_path)
         if rebased_path is not None:

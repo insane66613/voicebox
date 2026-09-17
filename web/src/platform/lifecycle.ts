@@ -24,6 +24,14 @@ class WebLifecycle implements PlatformLifecycle {
     // No-op for web
   }
 
+  async startRemoteProxy(_upstreamUrl: string, _port: number): Promise<void> {
+    // No-op for web - remote proxying is a desktop-only concern.
+  }
+
+  async stopRemoteProxy(): Promise<void> {
+    // No-op for web - remote proxying is a desktop-only concern.
+  }
+
   async setupWindowCloseHandler(): Promise<void> {
     // No-op for web - no window close handling needed
   }

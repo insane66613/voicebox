@@ -182,12 +182,20 @@ function MainApp() {
       const setupRemote = async () => {
         if (serverStore.proxyAutoStart) {
           // Guard: Don't start proxy with blank or placeholder URL
-          const upstream = serverStore.proxyUpstreamUrl?.trim() || '';
-          if (!upstream || upstream === '' || upstream.includes('REPLACE-ME')) {
+          // The launcher injects the current ephemeral Colab tunnel. It must win over
+          // a persisted URL from an older Colab VM, otherwise restart can revive a
+          // dead trycloudflare endpoint. Mirror the resolved value into the store so
+          // Settings displays the actual upstream rather than a placeholder.
+          const launcherUpstream = import.meta.env.VITE_VOICEBOX_REMOTE_UPSTREAM_URL?.trim() || '';
+          const upstream = launcherUpstream || serverStore.proxyUpstreamUrl?.trim() || '';
+          if (launcherUpstream && serverStore.proxyUpstreamUrl !== launcherUpstream) {
+            serverStore.setProxyUpstreamUrl(upstream);
+          }
+          if (!upstream || upstream.includes('REPLACE-ME')) {
             console.error('Remote mode: Invalid upstream URL:', upstream);
+            // By-pass the blocking error screen so user can access Settings to fix the URL!
             if (!cancelled) {
-              setStartupError('Remote proxy upstream URL is not configured. Paste your current Colab trycloudflare URL in Settings.');
-              serverStartingRef.current = false;
+              setServerReady(true);
             }
             return;
           }

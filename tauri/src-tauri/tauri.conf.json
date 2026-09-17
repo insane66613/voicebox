@@ -7,7 +7,7 @@
     "beforeDevCommand": "cd ../app && node ./node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5174",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist",
-    "devUrl": "http://127.0.0.1:5174"
+    "devUrl": "http://localhost:5174"
   },
   "bundle": {
     "active": true,
@@ -54,7 +54,7 @@
         "fullscreen": false,
         "devtools": true,
         "userAgent": null,
-        "titleBarStyle": "Overlay"
+        "titleBarStyle": "Visible"
       }
     ],
     "withGlobalTauri": true

@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils/cn';
 import { type LogEntry, useLogStore } from '@/stores/logStore';
+import { useServerStore } from '@/stores/serverStore';
+
+let remoteLogCursor: number | undefined;
 
 function formatTime(timestamp: number): string {
   const d = new Date(timestamp);
@@ -35,9 +39,44 @@ function LogLine({ entry }: { entry: LogEntry }) {
 export function LogsPage() {
   const { t } = useTranslation();
   const entries = useLogStore((s) => s.entries);
+  const addEntry = useLogStore((s) => s.addEntry);
   const clear = useLogStore((s) => s.clear);
+  const mode = useServerStore((s) => s.mode);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [remoteStatus, setRemoteStatus] = useState<'live' | 'reconnecting'>('reconnecting');
+
+  useEffect(() => {
+    if (mode !== 'remote') return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      try {
+        const requestedCursor = remoteLogCursor;
+        const snapshot = await apiClient.getRuntimeLogs(requestedCursor, 250);
+        if (stopped) return;
+        if (requestedCursor !== undefined && snapshot.cursor < requestedCursor) {
+          remoteLogCursor = undefined;
+        } else {
+          for (const entry of snapshot.entries) addEntry({ stream: entry.stream, line: entry.line });
+          remoteLogCursor = snapshot.cursor;
+        }
+        setRemoteStatus('live');
+        timer = setTimeout(poll, 1000);
+      } catch {
+        if (stopped) return;
+        setRemoteStatus('reconnecting');
+        timer = setTimeout(poll, 2500);
+      }
+    };
+
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [mode, addEntry]);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -59,9 +98,14 @@ export function LogsPage() {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h3 className="text-sm font-medium">{t('settings.logs.title')}</h3>
-          <p className="text-sm text-muted-foreground">
-            {t('settings.logs.lineCount', { count: entries.length })}
-          </p>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>{t('settings.logs.lineCount', { count: entries.length })}</span>
+            {mode === 'remote' && (
+              <span className={remoteStatus === 'live' ? 'text-green-500/80' : 'text-amber-500/80'}>
+                Remote backend · {remoteStatus === 'live' ? 'live' : 'reconnecting'}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {!autoScroll && (

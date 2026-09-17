@@ -119,7 +119,12 @@ export function GeneralPage() {
           title={t('settings.general.serverUrl.title')}
           description={t('settings.general.serverUrl.description')}
           action={
-            <ConnectionStatus health={health} isLoading={isLoading} healthError={healthError} />
+            <ConnectionStatus
+              health={health}
+              isLoading={isLoading}
+              healthError={healthError}
+              remoteViaProxy={platform.metadata.isTauri && mode === 'remote' && proxyAutoStart}
+            />
           }
         >
           <Form {...form}>
@@ -238,7 +243,7 @@ export function GeneralPage() {
                 <div className="flex gap-2">
                   <Input
                     id="proxyUpstreamUrl"
-                    placeholder="https://whatever.trycloudflare.com"
+                    placeholder="Current Colab tunnel is supplied by the launcher"
                     value={proxyUpstreamUrl}
                     onChange={(e) => setProxyUpstreamUrl(e.target.value)}
                     className="flex-1"
@@ -285,10 +290,12 @@ function ConnectionStatus({
   health,
   isLoading,
   healthError,
+  remoteViaProxy,
 }: {
   health: ReturnType<typeof useServerHealth>['data'];
   isLoading: boolean;
   healthError: ReturnType<typeof useServerHealth>['error'];
+  remoteViaProxy: boolean;
 }) {
   const { t } = useTranslation();
   if (isLoading) {
@@ -324,7 +331,7 @@ function ConnectionStatus({
         </span>
         {health.status === 'healthy' && (
           <span className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded ml-1 font-medium">
-            HEALTH LOCAL
+            {remoteViaProxy ? 'REMOTE VIA PROXY' : 'HEALTH LOCAL'}
           </span>
         )}
       </div>
